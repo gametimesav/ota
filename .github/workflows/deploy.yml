@@ -37,17 +37,7 @@ jobs:
           esphome compile config.yaml
 
       # Sets up the target folder structure for GitHub Pages deployment
-      - name: Prepare Public Directory Assets
-        run: |
-          mkdir -p public/firmware
-          
-          # Extracts the compiled binary file and moves it to your public folder
-          cp .esphome/build/*/.pioenvs/*/firmware.bin public/firmware/firmware.bin
-          
-          # Automatically parses your config file to extract the project version string
-          # and saves it cleanly into version.txt so the ESP32 can read it
-          grep -A 2 "project:" config.yaml | grep "version:" | awk -F'"' '{print $2}' > public/firmware/version.txt
-
+      
       - name: Upload Build Artifacts
         uses: actions/upload-pages-artifact@v3
         with:
