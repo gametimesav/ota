@@ -20,6 +20,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -28,7 +29,7 @@
 #endif
 
 #ifndef DISPLAY_MESSAGE
-#define DISPLAY_MESSAGE "OTA v0.2.4 - hello world display enabled"
+#define DISPLAY_MESSAGE "OTA v0.2.5 - update path demo"
 #endif
 
 #define WIFI_CONNECTED_BIT BIT0
@@ -51,6 +52,16 @@
 
 #define COLOR_BLACK 0x0000
 #define COLOR_WHITE 0xFFFF
+#define COLOR_RED 0xF800
+#define COLOR_GREEN 0x07E0
+#define COLOR_BLUE 0x001F
+#define COLOR_YELLOW 0xFFE0
+#define COLOR_CYAN 0x07FF
+
+#define STATUS_BAR_Y 4
+#define STATUS_BAR_H 14
+#define STATUS_AREA_Y 170
+#define STATUS_AREA_H (LCD_V_RES - STATUS_AREA_Y)
 
 static const char *TAG = "ota_example";
 static EventGroupHandle_t wifi_event_group;
@@ -59,6 +70,7 @@ static esp_netif_t *ap_netif;
 static httpd_handle_t portal_server;
 static esp_lcd_panel_handle_t lcd_panel;
 static bool display_ready;
+static SemaphoreHandle_t display_mutex;
 
 typedef struct {
 	char ssid[33];
@@ -120,6 +132,42 @@ static bool glyph_5x7(char c, uint8_t rows[7])
 {
 	memset(rows, 0, 7);
 	switch (c) {
+	case 'A':
+		rows[0] = 0x0E;
+		rows[1] = 0x11;
+		rows[2] = 0x11;
+		rows[3] = 0x1F;
+		rows[4] = 0x11;
+		rows[5] = 0x11;
+		rows[6] = 0x11;
+		return true;
+	case 'B':
+		rows[0] = 0x1E;
+		rows[1] = 0x11;
+		rows[2] = 0x11;
+		rows[3] = 0x1E;
+		rows[4] = 0x11;
+		rows[5] = 0x11;
+		rows[6] = 0x1E;
+		return true;
+	case 'C':
+		rows[0] = 0x0E;
+		rows[1] = 0x11;
+		rows[2] = 0x10;
+		rows[3] = 0x10;
+		rows[4] = 0x10;
+		rows[5] = 0x11;
+		rows[6] = 0x0E;
+		return true;
+	case 'D':
+		rows[0] = 0x1E;
+		rows[1] = 0x11;
+		rows[2] = 0x11;
+		rows[3] = 0x11;
+		rows[4] = 0x11;
+		rows[5] = 0x11;
+		rows[6] = 0x1E;
+		return true;
 	case 'H':
 		rows[0] = 0x11;
 		rows[1] = 0x11;
@@ -138,6 +186,42 @@ static bool glyph_5x7(char c, uint8_t rows[7])
 		rows[5] = 0x10;
 		rows[6] = 0x1F;
 		return true;
+	case 'F':
+		rows[0] = 0x1F;
+		rows[1] = 0x10;
+		rows[2] = 0x10;
+		rows[3] = 0x1E;
+		rows[4] = 0x10;
+		rows[5] = 0x10;
+		rows[6] = 0x10;
+		return true;
+	case 'G':
+		rows[0] = 0x0E;
+		rows[1] = 0x11;
+		rows[2] = 0x10;
+		rows[3] = 0x17;
+		rows[4] = 0x11;
+		rows[5] = 0x11;
+		rows[6] = 0x0E;
+		return true;
+	case 'I':
+		rows[0] = 0x1F;
+		rows[1] = 0x04;
+		rows[2] = 0x04;
+		rows[3] = 0x04;
+		rows[4] = 0x04;
+		rows[5] = 0x04;
+		rows[6] = 0x1F;
+		return true;
+	case 'K':
+		rows[0] = 0x11;
+		rows[1] = 0x12;
+		rows[2] = 0x14;
+		rows[3] = 0x18;
+		rows[4] = 0x14;
+		rows[5] = 0x12;
+		rows[6] = 0x11;
+		return true;
 	case 'L':
 		rows[0] = 0x10;
 		rows[1] = 0x10;
@@ -146,6 +230,24 @@ static bool glyph_5x7(char c, uint8_t rows[7])
 		rows[4] = 0x10;
 		rows[5] = 0x10;
 		rows[6] = 0x1F;
+		return true;
+	case 'M':
+		rows[0] = 0x11;
+		rows[1] = 0x1B;
+		rows[2] = 0x15;
+		rows[3] = 0x15;
+		rows[4] = 0x11;
+		rows[5] = 0x11;
+		rows[6] = 0x11;
+		return true;
+	case 'N':
+		rows[0] = 0x11;
+		rows[1] = 0x19;
+		rows[2] = 0x15;
+		rows[3] = 0x13;
+		rows[4] = 0x11;
+		rows[5] = 0x11;
+		rows[6] = 0x11;
 		return true;
 	case 'O':
 		rows[0] = 0x0E;
@@ -165,6 +267,15 @@ static bool glyph_5x7(char c, uint8_t rows[7])
 		rows[5] = 0x15;
 		rows[6] = 0x0A;
 		return true;
+	case 'P':
+		rows[0] = 0x1E;
+		rows[1] = 0x11;
+		rows[2] = 0x11;
+		rows[3] = 0x1E;
+		rows[4] = 0x10;
+		rows[5] = 0x10;
+		rows[6] = 0x10;
+		return true;
 	case 'R':
 		rows[0] = 0x1E;
 		rows[1] = 0x11;
@@ -174,14 +285,143 @@ static bool glyph_5x7(char c, uint8_t rows[7])
 		rows[5] = 0x12;
 		rows[6] = 0x11;
 		return true;
-	case 'D':
-		rows[0] = 0x1E;
+	case 'S':
+		rows[0] = 0x0F;
+		rows[1] = 0x10;
+		rows[2] = 0x10;
+		rows[3] = 0x0E;
+		rows[4] = 0x01;
+		rows[5] = 0x01;
+		rows[6] = 0x1E;
+		return true;
+	case 'T':
+		rows[0] = 0x1F;
+		rows[1] = 0x04;
+		rows[2] = 0x04;
+		rows[3] = 0x04;
+		rows[4] = 0x04;
+		rows[5] = 0x04;
+		rows[6] = 0x04;
+		return true;
+	case 'U':
+		rows[0] = 0x11;
 		rows[1] = 0x11;
 		rows[2] = 0x11;
 		rows[3] = 0x11;
 		rows[4] = 0x11;
 		rows[5] = 0x11;
+		rows[6] = 0x0E;
+		return true;
+	case 'V':
+		rows[0] = 0x11;
+		rows[1] = 0x11;
+		rows[2] = 0x11;
+		rows[3] = 0x11;
+		rows[4] = 0x11;
+		rows[5] = 0x0A;
+		rows[6] = 0x04;
+		return true;
+	case 'Y':
+		rows[0] = 0x11;
+		rows[1] = 0x11;
+		rows[2] = 0x0A;
+		rows[3] = 0x04;
+		rows[4] = 0x04;
+		rows[5] = 0x04;
+		rows[6] = 0x04;
+		return true;
+	case '0':
+		rows[0] = 0x0E;
+		rows[1] = 0x11;
+		rows[2] = 0x13;
+		rows[3] = 0x15;
+		rows[4] = 0x19;
+		rows[5] = 0x11;
+		rows[6] = 0x0E;
+		return true;
+	case '1':
+		rows[0] = 0x04;
+		rows[1] = 0x0C;
+		rows[2] = 0x04;
+		rows[3] = 0x04;
+		rows[4] = 0x04;
+		rows[5] = 0x04;
+		rows[6] = 0x1F;
+		return true;
+	case '2':
+		rows[0] = 0x0E;
+		rows[1] = 0x11;
+		rows[2] = 0x01;
+		rows[3] = 0x02;
+		rows[4] = 0x04;
+		rows[5] = 0x08;
+		rows[6] = 0x1F;
+		return true;
+	case '3':
+		rows[0] = 0x1E;
+		rows[1] = 0x01;
+		rows[2] = 0x01;
+		rows[3] = 0x0E;
+		rows[4] = 0x01;
+		rows[5] = 0x01;
 		rows[6] = 0x1E;
+		return true;
+	case '4':
+		rows[0] = 0x02;
+		rows[1] = 0x06;
+		rows[2] = 0x0A;
+		rows[3] = 0x12;
+		rows[4] = 0x1F;
+		rows[5] = 0x02;
+		rows[6] = 0x02;
+		return true;
+	case '5':
+		rows[0] = 0x1F;
+		rows[1] = 0x10;
+		rows[2] = 0x10;
+		rows[3] = 0x1E;
+		rows[4] = 0x01;
+		rows[5] = 0x01;
+		rows[6] = 0x1E;
+		return true;
+	case '6':
+		rows[0] = 0x0E;
+		rows[1] = 0x10;
+		rows[2] = 0x10;
+		rows[3] = 0x1E;
+		rows[4] = 0x11;
+		rows[5] = 0x11;
+		rows[6] = 0x0E;
+		return true;
+	case '7':
+		rows[0] = 0x1F;
+		rows[1] = 0x01;
+		rows[2] = 0x02;
+		rows[3] = 0x04;
+		rows[4] = 0x08;
+		rows[5] = 0x08;
+		rows[6] = 0x08;
+		return true;
+	case '8':
+		rows[0] = 0x0E;
+		rows[1] = 0x11;
+		rows[2] = 0x11;
+		rows[3] = 0x0E;
+		rows[4] = 0x11;
+		rows[5] = 0x11;
+		rows[6] = 0x0E;
+		return true;
+	case '9':
+		rows[0] = 0x0E;
+		rows[1] = 0x11;
+		rows[2] = 0x11;
+		rows[3] = 0x0F;
+		rows[4] = 0x01;
+		rows[5] = 0x01;
+		rows[6] = 0x0E;
+		return true;
+	case '.':
+		rows[6] = 0x04;
 		return true;
 	case ' ':
 		return true;
@@ -190,20 +430,31 @@ static bool glyph_5x7(char c, uint8_t rows[7])
 	}
 }
 
-static void display_clear(uint16_t color)
+static void display_fill_rect(int x, int y, int w, int h, uint16_t color)
 {
 	if (!display_ready || lcd_panel == NULL) {
 		return;
 	}
-
-	uint16_t line[LCD_H_RES];
-	for (int x = 0; x < LCD_H_RES; x++) {
-		line[x] = color;
+	if (w <= 0 || h <= 0) {
+		return;
+	}
+	if (x < 0 || y < 0 || x + w > LCD_H_RES || y + h > LCD_V_RES) {
+		return;
 	}
 
-	for (int y = 0; y < LCD_V_RES; y++) {
-		esp_lcd_panel_draw_bitmap(lcd_panel, 0, y, LCD_H_RES, y + 1, line);
+	uint16_t line[w];
+	for (int i = 0; i < w; i++) {
+		line[i] = color;
 	}
+
+	for (int row = 0; row < h; row++) {
+		esp_lcd_panel_draw_bitmap(lcd_panel, x, y + row, x + w, y + row + 1, line);
+	}
+}
+
+static void display_clear(uint16_t color)
+{
+	display_fill_rect(0, 0, LCD_H_RES, LCD_V_RES, color);
 }
 
 static void display_draw_char_5x7(int x, int y, char c, uint16_t fg, uint16_t bg, int scale)
@@ -244,6 +495,72 @@ static void display_draw_text(int x, int y, const char *text, uint16_t fg, uint1
 		display_draw_char_5x7(cursor, y, text[i], fg, bg, scale);
 		cursor += 6 * scale;
 	}
+}
+
+static void display_draw_text_centered(int y, const char *text, uint16_t fg, uint16_t bg, int scale)
+{
+	if (text == NULL) {
+		return;
+	}
+
+	int width = (int)strlen(text) * 6 * scale;
+	int x = (LCD_H_RES - width) / 2;
+	if (x < 0) {
+		x = 0;
+	}
+	display_draw_text(x, y, text, fg, bg, scale);
+}
+
+static bool display_lock(void)
+{
+	if (display_mutex == NULL) {
+		return false;
+	}
+	return xSemaphoreTake(display_mutex, pdMS_TO_TICKS(2000)) == pdTRUE;
+}
+
+static void display_unlock(void)
+{
+	if (display_mutex != NULL) {
+		xSemaphoreGive(display_mutex);
+	}
+}
+
+static void display_show_status_locked(const char *line1, const char *line2, uint16_t status_color)
+{
+	if (!display_ready) {
+		return;
+	}
+
+	display_fill_rect(0, STATUS_BAR_Y, LCD_H_RES, STATUS_BAR_H, status_color);
+	display_fill_rect(0, STATUS_AREA_Y, LCD_H_RES, STATUS_AREA_H, COLOR_BLACK);
+
+	if (line1 != NULL && line1[0] != '\0') {
+		display_draw_text_centered(182, line1, COLOR_CYAN, COLOR_BLACK, 2);
+	}
+	if (line2 != NULL && line2[0] != '\0') {
+		display_draw_text_centered(205, line2, COLOR_WHITE, COLOR_BLACK, 2);
+	}
+}
+
+static void display_show_status(const char *line1, const char *line2, uint16_t status_color)
+{
+	if (!display_lock()) {
+		return;
+	}
+	display_show_status_locked(line1, line2, status_color);
+	display_unlock();
+}
+
+static void display_show_boot_splash(const char *version)
+{
+	display_clear(COLOR_BLACK);
+	display_draw_text_centered(120, "HELLO WORLD", COLOR_WHITE, COLOR_BLACK, 3);
+
+	char version_line[32];
+	snprintf(version_line, sizeof(version_line), "VER %.26s", version);
+	display_draw_text_centered(190, version_line, COLOR_YELLOW, COLOR_BLACK, 2);
+	display_show_status_locked("BOOT", "STARTING", COLOR_BLUE);
 }
 
 static esp_err_t display_init(void)
@@ -309,6 +626,13 @@ static esp_err_t display_init(void)
 		ESP_ERROR_CHECK(gpio_set_level(LCD_PIN_NUM_BCKL, 1));
 	}
 
+	if (display_mutex == NULL) {
+		display_mutex = xSemaphoreCreateMutex();
+		if (display_mutex == NULL) {
+			return ESP_ERR_NO_MEM;
+		}
+	}
+
 	display_ready = true;
 	return ESP_OK;
 }
@@ -323,8 +647,13 @@ static void display_show_message(const char *message)
 		return;
 	}
 
-	display_clear(COLOR_BLACK);
-	display_draw_text(21, 149, "HELLO WORLD", COLOR_WHITE, COLOR_BLACK, 3);
+	if (!display_lock()) {
+		ESP_LOGE(TAG, "Display lock failed");
+		return;
+	}
+	const esp_app_desc_t *app = esp_app_get_description();
+	display_show_boot_splash(app->version);
+	display_unlock();
 }
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
@@ -332,12 +661,14 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 	if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
 		xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
 		ESP_LOGW(TAG, "Wi-Fi disconnected");
+		display_show_status("WIFI", "DISCONNECTED", COLOR_RED);
 		return;
 	}
 
 	if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
 		xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
 		ESP_LOGI(TAG, "Wi-Fi connected");
+		display_show_status("WIFI", "CONNECTED", COLOR_GREEN);
 	}
 }
 
@@ -441,6 +772,7 @@ static bool wifi_try_connect(const wifi_creds_t *creds, int timeout_ms)
 {
 	wifi_config_t sta_cfg = {0};
 	esp_err_t stop_err;
+	display_show_status("WIFI", "CONNECTING", COLOR_BLUE);
 
 	strncpy((char *)sta_cfg.sta.ssid, creds->ssid, sizeof(sta_cfg.sta.ssid) - 1);
 	strncpy((char *)sta_cfg.sta.password, creds->pass, sizeof(sta_cfg.sta.password) - 1);
@@ -463,10 +795,12 @@ static bool wifi_try_connect(const wifi_creds_t *creds, int timeout_ms)
 
 	if ((bits & WIFI_CONNECTED_BIT) != 0) {
 		ESP_LOGI(TAG, "Connected to SSID: %s", creds->ssid);
+		display_show_status("WIFI", "CONNECTED", COLOR_GREEN);
 		return true;
 	}
 
 	ESP_LOGW(TAG, "Wi-Fi connect timeout for SSID: %s", creds->ssid);
+	display_show_status("WIFI", "CONNECT FAIL", COLOR_RED);
 	return false;
 }
 
@@ -649,6 +983,7 @@ static void captive_portal_start(void)
 	ESP_ERROR_CHECK(httpd_register_uri_handler(portal_server, &catch_all));
 
 	ESP_LOGI(TAG, "Captive portal started on AP '%s' at http://192.168.4.1", AP_SSID);
+	display_show_status("WIFI", "PORTAL MODE", COLOR_YELLOW);
 }
 
 static ota_result_t ota_update_from_github(void)
@@ -670,9 +1005,11 @@ static ota_result_t ota_update_from_github(void)
 	esp_app_desc_t remote_app;
 
 	ESP_LOGI(TAG, "Starting OTA from: %s", FIRMWARE_URL);
+	display_show_status("OTA", "CHECKING", COLOR_BLUE);
 	esp_err_t err = esp_https_ota_begin(&ota_config, &ota_handle);
 	if (err != ESP_OK) {
 		ESP_LOGE(TAG, "esp_https_ota_begin failed: %s", esp_err_to_name(err));
+		display_show_status("OTA", "START FAIL", COLOR_RED);
 		return OTA_RESULT_FAILED;
 	}
 
@@ -680,6 +1017,7 @@ static ota_result_t ota_update_from_github(void)
 	if (err != ESP_OK) {
 		ESP_LOGE(TAG, "Failed to read remote firmware descriptor: %s", esp_err_to_name(err));
 		esp_https_ota_abort(ota_handle);
+		display_show_status("OTA", "DESC FAIL", COLOR_RED);
 		return OTA_RESULT_FAILED;
 	}
 
@@ -688,14 +1026,18 @@ static ota_result_t ota_update_from_github(void)
 	if (semver_compare(running_app->version, remote_app.version) <= 0) {
 		ESP_LOGI(TAG, "OTA final state: skipped (already up-to-date)");
 		esp_https_ota_abort(ota_handle);
+		display_show_status("OTA", "UP TO DATE", COLOR_GREEN);
 		return OTA_RESULT_SKIPPED;
 	}
+
+	display_show_status("OTA", "UPDATING", COLOR_YELLOW);
 
 	do {
 		err = esp_https_ota_perform(ota_handle);
 		if (err != ESP_OK && err != ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
 			ESP_LOGE(TAG, "OTA perform failed: %s", esp_err_to_name(err));
 			esp_https_ota_abort(ota_handle);
+			display_show_status("OTA", "WRITE FAIL", COLOR_RED);
 			return OTA_RESULT_FAILED;
 		}
 	} while (err == ESP_ERR_HTTPS_OTA_IN_PROGRESS);
@@ -703,27 +1045,34 @@ static ota_result_t ota_update_from_github(void)
 	if (!esp_https_ota_is_complete_data_received(ota_handle)) {
 		ESP_LOGE(TAG, "Incomplete OTA image received");
 		esp_https_ota_abort(ota_handle);
+		display_show_status("OTA", "INCOMPLETE", COLOR_RED);
 		return OTA_RESULT_FAILED;
 	}
 
 	err = esp_https_ota_finish(ota_handle);
 	if (err != ESP_OK) {
 		ESP_LOGE(TAG, "OTA failed: %s", esp_err_to_name(err));
+		display_show_status("OTA", "FINISH FAIL", COLOR_RED);
 		return OTA_RESULT_FAILED;
 	}
 
 	ESP_LOGI(TAG, "OTA final state: updated (restarting now)");
+	display_show_status("OTA", "UPDATED", COLOR_GREEN);
+	vTaskDelay(pdMS_TO_TICKS(600));
 	esp_restart();
 	return OTA_RESULT_UPDATED;
 }
 
 static void ota_task(void *arg)
 {
+	display_show_status("OTA", "TASK START", COLOR_BLUE);
 	ota_result_t result = ota_update_from_github();
 	if (result == OTA_RESULT_FAILED) {
 		ESP_LOGE(TAG, "OTA final state: failed");
+		display_show_status("OTA", "FAILED", COLOR_RED);
 	} else if (result == OTA_RESULT_SKIPPED) {
 		ESP_LOGI(TAG, "OTA final state: skipped");
+		display_show_status("OTA", "SKIPPED", COLOR_GREEN);
 	}
 	vTaskDelete(NULL);
 }
