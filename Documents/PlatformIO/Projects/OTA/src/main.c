@@ -1,12 +1,18 @@
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "driver/gpio.h"
+#include "driver/spi_master.h"
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_https_ota.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_ops.h"
+#include "esp_lcd_panel_st7789.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_ota_ops.h"
@@ -22,7 +28,7 @@
 #endif
 
 #ifndef DISPLAY_MESSAGE
-#define DISPLAY_MESSAGE "OTA target v0.2.3 - display text changed"
+#define DISPLAY_MESSAGE "OTA v0.2.4 - hello world display enabled"
 #endif
 
 #define WIFI_CONNECTED_BIT BIT0
@@ -31,11 +37,28 @@
 #define AP_SSID "ESP32-OTA-Setup"
 #define AP_PASS ""
 
+#define LCD_HOST SPI2_HOST
+#define LCD_H_RES 240
+#define LCD_V_RES 320
+#define LCD_PIXEL_CLOCK_HZ (26 * 1000 * 1000)
+
+#define LCD_PIN_NUM_MOSI 13
+#define LCD_PIN_NUM_CLK 14
+#define LCD_PIN_NUM_CS 15
+#define LCD_PIN_NUM_DC 2
+#define LCD_PIN_NUM_RST -1
+#define LCD_PIN_NUM_BCKL 21
+
+#define COLOR_BLACK 0x0000
+#define COLOR_WHITE 0xFFFF
+
 static const char *TAG = "ota_example";
 static EventGroupHandle_t wifi_event_group;
 static esp_netif_t *sta_netif;
 static esp_netif_t *ap_netif;
 static httpd_handle_t portal_server;
+static esp_lcd_panel_handle_t lcd_panel;
+static bool display_ready;
 
 typedef struct {
 	char ssid[33];
@@ -93,9 +116,215 @@ static int semver_compare(const char *current, const char *remote)
 	return 0;
 }
 
+static bool glyph_5x7(char c, uint8_t rows[7])
+{
+	memset(rows, 0, 7);
+	switch (c) {
+	case 'H':
+		rows[0] = 0x11;
+		rows[1] = 0x11;
+		rows[2] = 0x11;
+		rows[3] = 0x1F;
+		rows[4] = 0x11;
+		rows[5] = 0x11;
+		rows[6] = 0x11;
+		return true;
+	case 'E':
+		rows[0] = 0x1F;
+		rows[1] = 0x10;
+		rows[2] = 0x10;
+		rows[3] = 0x1E;
+		rows[4] = 0x10;
+		rows[5] = 0x10;
+		rows[6] = 0x1F;
+		return true;
+	case 'L':
+		rows[0] = 0x10;
+		rows[1] = 0x10;
+		rows[2] = 0x10;
+		rows[3] = 0x10;
+		rows[4] = 0x10;
+		rows[5] = 0x10;
+		rows[6] = 0x1F;
+		return true;
+	case 'O':
+		rows[0] = 0x0E;
+		rows[1] = 0x11;
+		rows[2] = 0x11;
+		rows[3] = 0x11;
+		rows[4] = 0x11;
+		rows[5] = 0x11;
+		rows[6] = 0x0E;
+		return true;
+	case 'W':
+		rows[0] = 0x11;
+		rows[1] = 0x11;
+		rows[2] = 0x11;
+		rows[3] = 0x15;
+		rows[4] = 0x15;
+		rows[5] = 0x15;
+		rows[6] = 0x0A;
+		return true;
+	case 'R':
+		rows[0] = 0x1E;
+		rows[1] = 0x11;
+		rows[2] = 0x11;
+		rows[3] = 0x1E;
+		rows[4] = 0x14;
+		rows[5] = 0x12;
+		rows[6] = 0x11;
+		return true;
+	case 'D':
+		rows[0] = 0x1E;
+		rows[1] = 0x11;
+		rows[2] = 0x11;
+		rows[3] = 0x11;
+		rows[4] = 0x11;
+		rows[5] = 0x11;
+		rows[6] = 0x1E;
+		return true;
+	case ' ':
+		return true;
+	default:
+		return false;
+	}
+}
+
+static void display_clear(uint16_t color)
+{
+	if (!display_ready || lcd_panel == NULL) {
+		return;
+	}
+
+	uint16_t line[LCD_H_RES];
+	for (int x = 0; x < LCD_H_RES; x++) {
+		line[x] = color;
+	}
+
+	for (int y = 0; y < LCD_V_RES; y++) {
+		esp_lcd_panel_draw_bitmap(lcd_panel, 0, y, LCD_H_RES, y + 1, line);
+	}
+}
+
+static void display_draw_char_5x7(int x, int y, char c, uint16_t fg, uint16_t bg, int scale)
+{
+	if (!display_ready || lcd_panel == NULL || scale < 1) {
+		return;
+	}
+
+	uint8_t glyph[7];
+	if (!glyph_5x7(c, glyph)) {
+		return;
+	}
+
+	for (int row = 0; row < 7; row++) {
+		for (int sy = 0; sy < scale; sy++) {
+			uint16_t line[5 * scale];
+			for (int col = 0; col < 5; col++) {
+				bool on = (glyph[row] & (1 << (4 - col))) != 0;
+				for (int sx = 0; sx < scale; sx++) {
+					line[col * scale + sx] = on ? fg : bg;
+				}
+			}
+
+			esp_lcd_panel_draw_bitmap(lcd_panel,
+								 x,
+								 y + (row * scale) + sy,
+								 x + (5 * scale),
+								 y + (row * scale) + sy + 1,
+								 line);
+		}
+	}
+}
+
+static void display_draw_text(int x, int y, const char *text, uint16_t fg, uint16_t bg, int scale)
+{
+	int cursor = x;
+	for (size_t i = 0; text[i] != '\0'; i++) {
+		display_draw_char_5x7(cursor, y, text[i], fg, bg, scale);
+		cursor += 6 * scale;
+	}
+}
+
+static esp_err_t display_init(void)
+{
+	if (display_ready) {
+		return ESP_OK;
+	}
+
+	spi_bus_config_t bus_config = {
+		.sclk_io_num = LCD_PIN_NUM_CLK,
+		.mosi_io_num = LCD_PIN_NUM_MOSI,
+		.miso_io_num = -1,
+		.quadwp_io_num = -1,
+		.quadhd_io_num = -1,
+		.max_transfer_sz = LCD_H_RES * 32 * sizeof(uint16_t),
+	};
+
+	esp_err_t err = spi_bus_initialize(LCD_HOST, &bus_config, SPI_DMA_CH_AUTO);
+	if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+		return err;
+	}
+
+	esp_lcd_panel_io_handle_t io_handle = NULL;
+	esp_lcd_panel_io_spi_config_t io_config = {
+		.dc_gpio_num = LCD_PIN_NUM_DC,
+		.cs_gpio_num = LCD_PIN_NUM_CS,
+		.pclk_hz = LCD_PIXEL_CLOCK_HZ,
+		.lcd_cmd_bits = 8,
+		.lcd_param_bits = 8,
+		.spi_mode = 0,
+		.trans_queue_depth = 10,
+	};
+
+	err = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_config, &io_handle);
+	if (err != ESP_OK) {
+		return err;
+	}
+
+	esp_lcd_panel_dev_config_t panel_config = {
+		.reset_gpio_num = LCD_PIN_NUM_RST,
+		.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+		.bits_per_pixel = 16,
+	};
+
+	err = esp_lcd_new_panel_st7789(io_handle, &panel_config, &lcd_panel);
+	if (err != ESP_OK) {
+		return err;
+	}
+
+	ESP_ERROR_CHECK(esp_lcd_panel_reset(lcd_panel));
+	ESP_ERROR_CHECK(esp_lcd_panel_init(lcd_panel));
+	ESP_ERROR_CHECK(esp_lcd_panel_invert_color(lcd_panel, true));
+	ESP_ERROR_CHECK(esp_lcd_panel_mirror(lcd_panel, true, false));
+	ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(lcd_panel, true));
+	ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(lcd_panel, true));
+
+	if (LCD_PIN_NUM_BCKL >= 0) {
+		gpio_config_t backlight_config = {
+			.mode = GPIO_MODE_OUTPUT,
+			.pin_bit_mask = 1ULL << LCD_PIN_NUM_BCKL,
+		};
+		ESP_ERROR_CHECK(gpio_config(&backlight_config));
+		ESP_ERROR_CHECK(gpio_set_level(LCD_PIN_NUM_BCKL, 1));
+	}
+
+	display_ready = true;
+	return ESP_OK;
+}
+
 static void display_show_message(const char *message)
 {
-	ESP_LOGI(TAG, "Display screen: %s", message);
+	ESP_LOGI(TAG, "Display message requested: %s", message);
+
+	esp_err_t err = display_init();
+	if (err != ESP_OK) {
+		ESP_LOGE(TAG, "Display init failed: %s", esp_err_to_name(err));
+		return;
+	}
+
+	display_clear(COLOR_BLACK);
+	display_draw_text(21, 149, "HELLO WORLD", COLOR_WHITE, COLOR_BLACK, 3);
 }
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
