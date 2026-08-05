@@ -28,7 +28,7 @@
 #endif
 
 #ifndef DISPLAY_MESSAGE
-#define DISPLAY_MESSAGE "OTA test firmware v0.1"
+#define DISPLAY_MESSAGE "OTA test firmware v0.2 - screen updated"
 #endif
 
 static const char *TAG = "ota_example";
