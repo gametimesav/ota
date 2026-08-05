@@ -24,7 +24,7 @@
 #endif
 
 #ifndef FIRMWARE_URL
-#define FIRMWARE_URL "https://github.com/gametimesav/plane_radar/releases/latest/download/firmware.bin"
+#define FIRMWARE_URL "https://github.com/gametimesav/ota/releases/latest/download/firmware.bin"
 #endif
 
 #ifndef DISPLAY_MESSAGE
