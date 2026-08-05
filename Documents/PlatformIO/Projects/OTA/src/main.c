@@ -22,7 +22,7 @@
 #endif
 
 #ifndef DISPLAY_MESSAGE
-#define DISPLAY_MESSAGE "OTA baseline v0.2.2 - semver check fixed"
+#define DISPLAY_MESSAGE "OTA target v0.2.3 - display text changed"
 #endif
 
 #define WIFI_CONNECTED_BIT BIT0
