@@ -22,7 +22,7 @@
 #endif
 
 #ifndef DISPLAY_MESSAGE
-#define DISPLAY_MESSAGE "OTA test firmware v0.2.1 - small display tweak"
+#define DISPLAY_MESSAGE "OTA baseline v0.2.2 - semver check fixed"
 #endif
 
 #define WIFI_CONNECTED_BIT BIT0
@@ -456,7 +456,7 @@ static ota_result_t ota_update_from_github(void)
 
 	ESP_LOGI(TAG, "Current firmware version: %s", running_app->version);
 	ESP_LOGI(TAG, "Remote firmware version:  %s", remote_app.version);
-	if (semver_compare(running_app->version, remote_app.version) >= 0) {
+	if (semver_compare(running_app->version, remote_app.version) <= 0) {
 		ESP_LOGI(TAG, "OTA final state: skipped (already up-to-date)");
 		esp_https_ota_abort(ota_handle);
 		return OTA_RESULT_SKIPPED;
